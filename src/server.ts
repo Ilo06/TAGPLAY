@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import path from "node:path";
 import { createApp } from "./app.js";
 
@@ -25,19 +24,12 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 const dataDir = path.resolve(process.env.DATA_DIR || "./data");
-const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
 
-execFile(ffmpegPath, ["-version"], (err) => {
-  if (err) {
-    fail(`ffmpeg is not available (tried "${ffmpegPath}"). Install ffmpeg or set FFMPEG_PATH.`);
-  }
-
-  const app = createApp({ adminKey, baseUrl, dataDir, ffmpegPath });
-  // Local only: nginx is the public entry point.
-  const server = app.listen(port, "127.0.0.1", () => {
-    console.log(`tagplay listening on http://127.0.0.1:${port} (data: ${dataDir})`);
-  });
-  // Node's default 5 min limit on receiving a request would abort slow uploads
-  // of large files (nginx streams them through as they arrive).
-  server.requestTimeout = 0;
+const app = createApp({ adminKey, baseUrl, dataDir });
+// Local only: nginx is the public entry point.
+const server = app.listen(port, "127.0.0.1", () => {
+  console.log(`tagplay listening on http://127.0.0.1:${port} (data: ${dataDir})`);
 });
+// Node's default 5 min limit on receiving a request would abort slow uploads
+// of large files (nginx streams them through as they arrive).
+server.requestTimeout = 0;

@@ -49,12 +49,12 @@
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-slate-300 mb-1">Video File (Max 500MB)</label>
-                        <input type="file" id="videoFile" accept="video/*" required
+                        <input type="file" id="videoFile" accept="video/mp4" required
                             class="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 file:cursor-pointer">
                     </div>
                     <button type="submit" id="uploadBtn"
                         class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 px-4 rounded-lg transition disabled:opacity-50">
-                        Upload & Convert
+                        Upload
                     </button>
                 </form>
 
@@ -194,7 +194,7 @@
             }
 
             uploadBtn.disabled = true;
-            uploadBtn.textContent = 'Converting & Uploading (Please wait)...';
+            uploadBtn.textContent = 'Uploading (Please wait)...';
             resultBox.classList.add('hidden');
 
             try {
@@ -219,7 +219,7 @@
                 alert(`Upload error: ${err.message}`);
             } finally {
                 uploadBtn.disabled = false;
-                uploadBtn.textContent = 'Upload & Convert';
+                uploadBtn.textContent = 'Upload';
             }
         }
 

@@ -4,9 +4,9 @@ Self-hosted app for NFC tags. A tag stores a short URL such as
 `https://tagplay.duckdns.org/v/HI542HCI`; scanning it opens a page that streams a
 video. The link stays valid until you deactivate it.
 
-You upload a video with one REST call (any format: mp4, mov, mkv, ...). The server
-converts it with ffmpeg to a single MP4 (H.264 + AAC, faststart), stores it on local
-disk and returns the link to write on the tag.
+You convert your video on your own machine with `scripts/convert.sh` (MP4, H.264 + AAC,
+faststart), then upload the result with one REST call. The server does no conversion: it
+stores the MP4 on local disk and returns the link to write on the tag.
 
 Node.js 20+, TypeScript, Express, multer, better-sqlite3. No Docker, no cloud.
 
@@ -18,14 +18,12 @@ Node.js 20+, TypeScript, Express, multer, better-sqlite3. No Docker, no cloud.
 | `BASE_URL`    | yes      |          | Public URL, e.g. `https://tagplay.duckdns.org`            |
 | `PORT`        | no       | `3001`   | Port; the app listens on `127.0.0.1` only                 |
 | `DATA_DIR`    | no       | `./data` | Holds `tagplay.db`, `videos/` and `tmp/`                  |
-| `FFMPEG_PATH` | no       | `ffmpeg` | ffmpeg binary (looked up on the PATH by default)          |
 
-The app refuses to start if `ADMIN_KEY` or `BASE_URL` is missing, or if `ffmpeg -version`
-fails.
+The app refuses to start if `ADMIN_KEY` or `BASE_URL` is missing.
 
 ## Run locally
 
-Needs Node 20+ and ffmpeg (with libx264 and aac) installed.
+Needs Node 20+.
 
 ```bash
 npm install
@@ -37,18 +35,28 @@ PowerShell:
 ```powershell
 npm install
 $env:ADMIN_KEY="dev-key"; $env:BASE_URL="http://localhost:3001"; npm run dev
-# if ffmpeg is not on the PATH: $env:FFMPEG_PATH="C:\path\to\ffmpeg.exe"
 ```
 
 Then open http://localhost:3001 (the app has no home page; upload a video first and
 open the returned `url`).
 
-## Upload a video
+## Prepare a video (on your machine)
 
-Any video format works, the server converts it:
+Needs ffmpeg (with libx264 and aac) installed locally, e.g. `sudo dnf install ffmpeg`.
 
 ```bash
-curl -X POST https://tagplay.duckdns.org/admin/videos -H "X-Admin-Key: $ADMIN_KEY" -F "title=Demo" -F "video=@source.mov"
+./scripts/convert.sh source.mov      # -> source-tagplay.mp4
+```
+
+The script runs ffmpeg with: `-c:v libx264 -pix_fmt yuv420p -crf 28 -preset slow
+-c:a aac -b:a 96k -movflags +faststart`. Set `FFMPEG_PATH` if ffmpeg is not on the PATH.
+
+## Upload a video
+
+Upload the already processed MP4 (the server stores it as is):
+
+```bash
+curl -X POST https://tagplay.duckdns.org/admin/videos -H "X-Admin-Key: $ADMIN_KEY" -F "title=Demo" -F "video=@source-tagplay.mp4"
 ```
 
 (In Windows PowerShell use `curl.exe` and `$env:ADMIN_KEY`; plain `curl` is an alias of
@@ -61,11 +69,10 @@ Response `201`:
 ```
 
 Write `url` on the NFC tag. `title` is optional (defaults to the file name without its
-extension). **The request returns only once the conversion is finished**, so a long video
-can take several minutes; curl simply waits.
+extension).
 
 Errors are JSON `{ "error": "..." }`: `401` wrong/missing key, `413` over 500 MB,
-`415` not a video, `422` ffmpeg could not convert the file.
+`415` not an MP4 (`video/mp4`).
 
 ## Other admin endpoints
 
@@ -102,11 +109,11 @@ Prerequisites:
 - Ports 80 and 443 are open on the server and forwarded by your router (certbot needs
   them to issue the certificate).
 
-1. **Install what is missing.** nginx is already there. Install Node 20+ and ffmpeg
-   manually, and certbot with its nginx plugin, e.g. on Debian/Ubuntu:
+1. **Install what is missing.** nginx is already there. Install Node 20+ manually, and
+   certbot with its nginx plugin, e.g. on Debian/Ubuntu:
 
    ```bash
-   sudo apt install ffmpeg certbot python3-certbot-nginx
+   sudo apt install certbot python3-certbot-nginx
    # Node 20+: install it your usual way (NodeSource, ...), then check: node -v
    ```
 
@@ -144,8 +151,6 @@ Prerequisites:
    sudo chmod 600 /etc/tagplay.env
    sudo cat /etc/tagplay.env      # note your ADMIN_KEY
    ```
-
-   Add `FFMPEG_PATH=/full/path/to/ffmpeg` only if ffmpeg is not on the PATH.
 
 5. **Enable and start the service:**
 
@@ -190,7 +195,7 @@ sudo systemctl restart tagplay
 
 ### Backups
 
-`DATA_DIR` (`/var/lib/tagplay`) is the folder to back up: the converted videos in
+`DATA_DIR` (`/var/lib/tagplay`) is the folder to back up: the uploaded videos in
 `videos/` and the database `tagplay.db`. Copy it while the service is stopped, or the
 database file may be caught mid-write. `tmp/` holds in-progress uploads and does not need
 backing up.

@@ -28,12 +28,9 @@ paths:
       operationId: uploadVideo
       summary: Upload a video and get its tag link
       description: |
-        Accepts any video format (mp4, mov, mkv, ...). The server converts it with ffmpeg to a
-        single MP4 (H.264 + AAC, faststart), stores it, creates a video and a tag, and returns the
-        link to write on the NFC tag.
-
-        The conversion runs during the request, so **the response only comes back once ffmpeg has
-        finished**. A long video can take several minutes; clients must not time out early.
+        Accepts an **already processed** MP4 (H.264 + AAC, faststart; see `scripts/convert.sh`).
+        The server does no conversion: it stores the file as is, creates a video and a tag, and
+        returns the link to write on the NFC tag.
 
         The admin key is checked before the body is read, so unauthenticated requests write nothing
         to disk. Maximum upload size is 500 MB.
@@ -54,13 +51,13 @@ paths:
                 video:
                   type: string
                   format: binary
-                  description: The video file. Its mimetype must start with `video/`.
+                  description: The processed MP4 file. Its mimetype must be `video/mp4`.
             encoding:
               video:
-                contentType: video/*
+                contentType: video/mp4
       responses:
         '201':
-          description: Video converted and stored, tag created.
+          description: Video stored, tag created.
           content:
             application/json:
               schema:
@@ -84,21 +81,13 @@ paths:
               example:
                 error: File too large (max 500 MB)
         '415':
-          description: The uploaded file's mimetype does not start with `video/`.
+          description: The uploaded file's mimetype is not `video/mp4`.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                error: A video file is required (field 'video', mimetype video/*)
-        '422':
-          description: ffmpeg could not convert the file (corrupt or unsupported).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: The video could not be converted (corrupt or unsupported file)
+                error: An MP4 file is required (field 'video', mimetype video/mp4)
         '500':
           $ref: '#/components/responses/InternalError'
 
