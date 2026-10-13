@@ -1,0 +1,17 @@
+[Unit]
+Description=tagplay - NFC tag video streaming
+After=network.target
+
+[Service]
+Type=simple
+User=tagplay
+Group=tagplay
+WorkingDirectory=/opt/tagplay
+EnvironmentFile=/etc/tagplay.env
+# Adjust the node path if needed (check with: which node)
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
