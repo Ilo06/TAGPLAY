@@ -1,6 +1,7 @@
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
+import cors from "cors";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
@@ -115,6 +116,9 @@ export function createApp(config: Config): express.Express {
   });
 
   const app = express();
+
+  // Enable CORS for all origins (allows local html files or remote dashboard to connect)
+  app.use(cors());
 
   // ---------- Admin ----------
 

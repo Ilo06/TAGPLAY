@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>tagplay Admin Dashboard</title>
+    <!-- Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+
+    <div class="max-w-6xl mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 border-b border-slate-800 pb-6">
+            <div>
+                <h1 class="text-3xl font-bold tracking-tight text-white">tagplay Admin</h1>
+                <p class="text-slate-400 text-sm mt-1">Manage your NFC video tags and uploads.</p>
+            </div>
+            
+            <!-- Credentials Form -->
+            <div class="bg-slate-800/60 p-4 rounded-xl border border-slate-700/60 flex flex-wrap gap-3 items-end w-full md:w-auto">
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 mb-1">Server URL</label>
+                    <input type="text" id="serverUrl" placeholder="http://localhost:3001" 
+                        class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500 w-48">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 mb-1">Admin Key</label>
+                    <input type="password" id="adminKey" placeholder="X-Admin-Key" 
+                        class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500 w-40">
+                </div>
+                <button onclick="saveSettings()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm px-4 py-1.5 rounded-lg transition">
+                    Save & Load
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- Upload Section -->
+            <div class="lg:col-span-1 bg-slate-800/40 border border-slate-800 rounded-2xl p-6 h-fit">
+                <h2 class="text-xl font-semibold mb-4 text-white">Upload Video</h2>
+                <form id="uploadForm" onsubmit="uploadVideo(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-1">Video Title (Optional)</label>
+                        <input type="text" id="videoTitle" placeholder="Defaults to file name" 
+                            class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-1">Video File (Max 500MB)</label>
+                        <input type="file" id="videoFile" accept="video/*" required
+                            class="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 file:cursor-pointer">
+                    </div>
+                    <button type="submit" id="uploadBtn"
+                        class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 px-4 rounded-lg transition disabled:opacity-50">
+                        Upload & Convert
+                    </button>
+                </form>
+
+                <!-- Upload Status / Result -->
+                <div id="uploadResult" class="mt-4 hidden p-4 rounded-xl bg-slate-900 border border-slate-700">
+                    <p class="text-xs text-emerald-400 font-semibold uppercase tracking-wider mb-1">Success!</p>
+                    <p id="resultCode" class="text-sm font-mono text-white mb-2"></p>
+                    <div class="flex gap-2">
+                        <input type="text" id="resultUrl" readonly class="w-full bg-slate-800 text-xs px-2 py-1.5 rounded border border-slate-700 text-slate-300 select-all">
+                        <button onclick="copyResultUrl()" class="bg-slate-700 hover:bg-slate-600 text-xs px-3 py-1.5 rounded text-white transition">Copy</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tags List Section -->
+            <div class="lg:col-span-2 bg-slate-800/40 border border-slate-800 rounded-2xl p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-white">Managed Tags</h2>
+                    <button onclick="loadTags()" class="text-xs text-indigo-400 hover:text-indigo-300 underline">Refresh List</button>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-sm">
+                        <thead>
+                            <tr class="border-b border-slate-700 text-slate-400 text-xs uppercase tracking-wider">
+                                <th class="py-3 px-2">Code / URL</th>
+                                <th class="py-3 px-2">Title</th>
+                                <th class="py-3 px-2">Status</th>
+                                <th class="py-3 px-2 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tagsTableBody" class="divide-y divide-slate-800">
+                            <tr>
+                                <td colspan="4" class="text-center py-6 text-slate-500">Configure your Server URL and Admin Key above to load tags.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // Load settings from localStorage on startup
+        document.getElementById('serverUrl').value = localStorage.getItem('tagplay_url') || '';
+        document.getElementById('adminKey').value = localStorage.getItem('tagplay_key') || '';
+
+        if (document.getElementById('serverUrl').value && document.getElementById('adminKey').value) {
+            loadTags();
+        }
+
+        function saveSettings() {
+            const url = document.getElementById('serverUrl').value.replace(/\/+$/, '');
+            const key = document.getElementById('adminKey').value;
+            localStorage.setItem('tagplay_url', url);
+            localStorage.setItem('tagplay_key', key);
+            alert('Settings saved!');
+            loadTags();
+        }
+
+        function getAuthHeaders() {
+            return {
+                'X-Admin-Key': document.getElementById('adminKey').value
+            };
+        }
+
+        function getServerUrl() {
+            return document.getElementById('serverUrl').value.replace(/\/+$/, '');
+        }
+
+        async function loadTags() {
+            const url = getServerUrl();
+            const tbody = document.getElementById('tagsTableBody');
+            if (!url) return;
+
+            tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-slate-400">Loading tags...</td></tr>`;
+
+            try {
+                const res = await fetch(`${url}/admin/tags`, {
+                    headers: getAuthHeaders()
+                });
+                if (!res.ok) throw new Error('Failed to fetch tags (Check Admin Key)');
+                const tags = await res.json();
+
+                if (tags.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-slate-500">No tags found yet. Upload a video to create one!</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = tags.map(tag => {
+                    const tagFullUrl = `${url}/v/${tag.code}`;
+                    return `
+                        <tr class="hover:bg-slate-800/30 transition">
+                            <td class="py-3 px-2">
+                                <a href="${tagFullUrl}" target="_blank" class="font-mono font-bold text-indigo-400 hover:underline">${tag.code}</a>
+                                <div class="text-xs text-slate-500 truncate max-w-[180px]">${tagFullUrl}</div>
+                            </td>
+                            <td class="py-3 px-2 text-slate-200 font-medium">${escapeHtml(tag.videoTitle)}</td>
+                            <td class="py-3 px-2">
+                                <span class="px-2 py-1 rounded-full text-xs font-semibold ${tag.active ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}">
+                                    ${tag.active ? 'Active' : 'Deactivated'}
+                                </span>
+                            </td>
+                            <td class="py-3 px-2 text-right">
+                                <button onclick="toggleTag('${tag.code}', ${!tag.active})" 
+                                    class="text-xs px-3 py-1.5 rounded font-medium transition ${tag.active ? 'bg-rose-600/20 hover:bg-rose-600/30 text-rose-300' : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300'}">
+                                    ${tag.active ? 'Deactivate' : 'Reactivate'}
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-rose-400">Error: ${err.message}</td></tr>`;
+            }
+        }
+
+        async function uploadVideo(event) {
+            event.preventDefault();
+            const url = getServerUrl();
+            const fileInput = document.getElementById('videoFile');
+            const titleInput = document.getElementById('videoTitle');
+            const uploadBtn = document.getElementById('uploadBtn');
+            const resultBox = document.getElementById('uploadResult');
+
+            if (!url) {
+                alert('Please enter and save your Server URL first.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('video', fileInput.files[0]);
+            if (titleInput.value.trim()) {
+                formData.append('title', titleInput.value.trim());
+            }
+
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Converting & Uploading (Please wait)...';
+            resultBox.classList.add('hidden');
+
+            try {
+                const res = await fetch(`${url}/admin/videos`, {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: formData
+                });
+
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Upload failed');
+
+                document.getElementById('resultCode').textContent = `Tag Code: ${data.code}`;
+                document.getElementById('resultUrl').value = data.url;
+                resultBox.classList.remove('hidden');
+
+                // Reset form and reload list
+                fileInput.value = '';
+                titleInput.value = '';
+                loadTags();
+            } catch (err) {
+                alert(`Upload error: ${err.message}`);
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload & Convert';
+            }
+        }
+
+        async function toggleTag(code, newActiveState) {
+            const url = getServerUrl();
+            try {
+                const res = await fetch(`${url}/admin/tags/${code}`, {
+                    method: 'PATCH',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ active: newActiveState })
+                });
+                if (!res.ok) throw new Error('Failed to update tag status');
+                loadTags();
+            } catch (err) {
+                alert(`Error: ${err.message}`);
+            }
+        }
+
+        function copyResultUrl() {
+            const copyText = document.getElementById('resultUrl');
+            copyText.select();
+            navigator.clipboard.writeText(copyText.value);
+            alert('Copied URL to clipboard!');
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+    </script>
+</body>
+</html>
