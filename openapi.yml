@@ -1,0 +1,388 @@
+openapi: 3.0.3
+info:
+  title: tagplay API
+  version: 1.0.0
+  description: |
+    Self-hosted API behind NFC video tags. A tag stores a short URL
+    (`https://tagplay.duckdns.org/v/HI542HCI`); scanning it opens a page that streams a video.
+
+    - **Admin** endpoints (`/admin/*`) are protected by the `X-Admin-Key` header.
+    - **Public** endpoints (`/v/*`) serve the player page and the MP4 stream.
+
+    All admin errors are JSON: `{ "error": "message" }`.
+servers:
+  - url: https://tagplay.duckdns.org
+    description: Production
+  - url: http://localhost:3001
+    description: Local development
+tags:
+  - name: Admin
+    description: Upload videos and manage tags (requires `X-Admin-Key`).
+  - name: Public
+    description: What a phone opens after scanning a tag.
+
+paths:
+  /admin/videos:
+    post:
+      tags: [Admin]
+      operationId: uploadVideo
+      summary: Upload a video and get its tag link
+      description: |
+        Accepts any video format (mp4, mov, mkv, ...). The server converts it with ffmpeg to a
+        single MP4 (H.264 + AAC, faststart), stores it, creates a video and a tag, and returns the
+        link to write on the NFC tag.
+
+        The conversion runs during the request, so **the response only comes back once ffmpeg has
+        finished**. A long video can take several minutes; clients must not time out early.
+
+        The admin key is checked before the body is read, so unauthenticated requests write nothing
+        to disk. Maximum upload size is 500 MB.
+      security:
+        - AdminKey: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [video]
+              properties:
+                title:
+                  type: string
+                  description: Display title. Defaults to the original file name without its extension.
+                  example: Demo
+                video:
+                  type: string
+                  format: binary
+                  description: The video file. Its mimetype must start with `video/`.
+            encoding:
+              video:
+                contentType: video/*
+      responses:
+        '201':
+          description: Video converted and stored, tag created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResult'
+        '400':
+          description: No `video` file in the request, or a malformed multipart body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: A video file is required (field 'video')
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: The file is larger than 500 MB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: File too large (max 500 MB)
+        '415':
+          description: The uploaded file's mimetype does not start with `video/`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: A video file is required (field 'video', mimetype video/*)
+        '422':
+          description: ffmpeg could not convert the file (corrupt or unsupported).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: The video could not be converted (corrupt or unsupported file)
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/tags:
+    get:
+      tags: [Admin]
+      operationId: listTags
+      summary: List tags with their video
+      description: Returns every tag, newest first.
+      security:
+        - AdminKey: []
+      responses:
+        '200':
+          description: All tags.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tag'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/tags/{code}:
+    patch:
+      tags: [Admin]
+      operationId: updateTag
+      summary: Deactivate, reactivate or repoint a tag
+      description: |
+        Set `active` to `false` to stop a tag working (both public routes return 404 immediately),
+        or `true` to bring it back. Set `videoId` to point the tag to another existing video.
+        At least one of the two fields is required.
+      security:
+        - AdminKey: []
+      parameters:
+        - $ref: '#/components/parameters/Code'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagPatch'
+            examples:
+              deactivate:
+                summary: Deactivate a tag
+                value:
+                  active: false
+              repoint:
+                summary: Point the tag to another video
+                value:
+                  videoId: 2
+      responses:
+        '200':
+          description: The updated tag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+        '400':
+          description: Invalid body (malformed JSON, wrong field types, or no field provided).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Provide 'active' and/or 'videoId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The tag, or the video given in `videoId`, does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                tagNotFound:
+                  value:
+                    error: Tag not found
+                videoNotFound:
+                  value:
+                    error: Video not found
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v/{code}:
+    get:
+      tags: [Public]
+      operationId: getPlayerPage
+      summary: Player page
+      description: |
+        Full-screen HTML page with a `<video>` element that streams `/v/{code}/video`. The code is
+        case-insensitive. Returns 404 if the tag does not exist or is deactivated.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Code'
+      responses:
+        '200':
+          description: The player page.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            text/html:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/VideoNotFoundPage'
+
+  /v/{code}/video:
+    get:
+      tags: [Public]
+      operationId: streamVideo
+      summary: Stream the MP4
+      description: |
+        Streams the stored MP4 inline (`Content-Disposition: inline`, `Cache-Control: no-store`).
+        HTTP Range requests are supported (206 Partial Content), which iPhone/Safari requires for
+        playback and seeking. Returns 404 if the tag does not exist or is deactivated.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Code'
+        - name: Range
+          in: header
+          required: false
+          description: Byte range to fetch.
+          schema:
+            type: string
+            example: bytes=0-99
+      responses:
+        '200':
+          description: The whole video.
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+            Content-Disposition:
+              schema:
+                type: string
+                example: inline
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: The requested byte range.
+          headers:
+            Content-Range:
+              schema:
+                type: string
+                example: bytes 0-99/51109
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+            Content-Disposition:
+              schema:
+                type: string
+                example: inline
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/VideoNotFoundPage'
+        '416':
+          description: The requested range cannot be satisfied.
+
+components:
+  securitySchemes:
+    AdminKey:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
+      description: Must equal the server's `ADMIN_KEY`. A wrong or missing key gives 401.
+
+  parameters:
+    Code:
+      name: code
+      in: path
+      required: true
+      description: 8-character tag code (A-Z, 0-9). Case-insensitive.
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9]{8}$'
+        example: HI542HCI
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid `X-Admin-Key`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Missing or invalid X-Admin-Key
+    InternalError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Internal server error
+    VideoNotFoundPage:
+      description: The tag does not exist or is deactivated. Returns a simple "Video not found" HTML page.
+      headers:
+        Cache-Control:
+          schema:
+            type: string
+            example: no-store
+      content:
+        text/html:
+          schema:
+            type: string
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+
+    UploadResult:
+      type: object
+      required: [videoId, code, url]
+      properties:
+        videoId:
+          type: integer
+          example: 1
+        code:
+          type: string
+          pattern: '^[A-Z0-9]{8}$'
+          example: HI542HCI
+        url:
+          type: string
+          format: uri
+          description: '`BASE_URL` + `/v/` + code. This is what you write on the NFC tag.'
+          example: https://tagplay.duckdns.org/v/HI542HCI
+
+    Tag:
+      type: object
+      required: [code, active, createdAt, videoId, videoTitle]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Z0-9]{8}$'
+          example: HI542HCI
+        active:
+          type: boolean
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-13T09:35:20.243Z'
+        videoId:
+          type: integer
+          example: 1
+        videoTitle:
+          type: string
+          example: Demo
+
+    TagPatch:
+      type: object
+      minProperties: 1
+      properties:
+        active:
+          type: boolean
+          description: "`false` deactivates the tag, `true` reactivates it."
+        videoId:
+          type: integer
+          description: Id of an existing video the tag should point to.
