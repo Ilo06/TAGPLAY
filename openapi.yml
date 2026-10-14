@@ -91,6 +91,57 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /admin/videos/{id}:
+    delete:
+      tags: [Admin]
+      operationId: deleteVideo
+      summary: Permanently delete a video
+      description: |
+        **Irreversible.** Removes the video, every tag that points to it (their links stop working
+        for good and are never reused for this video) and the MP4 file itself. The file is
+        overwritten with zeros and flushed to disk before being unlinked.
+
+        The database rows are removed first, so the public routes answer 404 immediately. If the
+        file cannot be erased afterwards, the call answers 500 and the rows stay removed.
+      security:
+        - AdminKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Video id, as returned by the upload endpoint (`videoId`).
+          schema:
+            type: integer
+            minimum: 1
+            example: 1
+      responses:
+        '200':
+          description: Video, tags and file deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResult'
+        '400':
+          description: The id is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Video id must be a positive integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No video with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Video not found
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /admin/tags:
     get:
       tags: [Admin]
@@ -342,6 +393,24 @@ components:
           format: uri
           description: '`BASE_URL` + `/v/` + code. This is what you write on the NFC tag.'
           example: https://tagplay.duckdns.org/v/HI542HCI
+
+    DeleteResult:
+      type: object
+      required: [deleted, videoId, removedTags]
+      properties:
+        deleted:
+          type: boolean
+          example: true
+        videoId:
+          type: integer
+          example: 1
+        removedTags:
+          type: array
+          description: Codes of the tags that were removed with the video.
+          items:
+            type: string
+            pattern: '^[A-Z0-9]{8}$'
+          example: [HI542HCI]
 
     Tag:
       type: object

@@ -31,6 +31,9 @@ let db: Database.Database;
 export function initDb(dataDir: string): void {
   db = new Database(path.join(dataDir, "tagplay.db"));
   db.pragma("foreign_keys = ON");
+  // Deleted rows are overwritten with zeros inside the database file instead of
+  // being left behind in free pages, so a deleted video leaves no trace there.
+  db.pragma("secure_delete = ON");
   db.exec(`
     CREATE TABLE IF NOT EXISTS videos (
       id INTEGER PRIMARY KEY,
@@ -109,5 +112,23 @@ export function updateTag(code: string, patch: { active?: boolean; videoId?: num
     if (patch.videoId !== undefined) {
       db.prepare("UPDATE tags SET video_id = ? WHERE code = ?").run(patch.videoId, code);
     }
+  })();
+}
+
+// Permanently removes a video and every tag pointing to it, in one transaction.
+// Returns the stored file name (so the caller can erase the file) and the codes of
+// the tags that were removed, or undefined if the video does not exist.
+export function deleteVideo(id: number): { fileName: string; codes: string[] } | undefined {
+  return db.transaction(() => {
+    const video = db.prepare("SELECT * FROM videos WHERE id = ?").get(id) as VideoRow | undefined;
+    if (!video) return undefined;
+
+    const codes = (db.prepare("SELECT code FROM tags WHERE video_id = ?").all(id) as {
+      code: string;
+    }[]).map((row) => row.code);
+
+    db.prepare("DELETE FROM tags WHERE video_id = ?").run(id);
+    db.prepare("DELETE FROM videos WHERE id = ?").run(id);
+    return { fileName: video.file_name, codes };
   })();
 }

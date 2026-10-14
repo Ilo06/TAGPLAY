@@ -91,6 +91,24 @@ curl -X PATCH https://tagplay.duckdns.org/admin/tags/HI542HCI \
   -d '{"videoId": 2}'
 ```
 
+## Delete a video permanently
+
+```bash
+curl -X DELETE https://tagplay.duckdns.org/admin/videos/1 -H "X-Admin-Key: $ADMIN_KEY"
+```
+
+Response `200`: `{ "deleted": true, "videoId": 1, "removedTags": ["HI542HCI"] }`.
+
+This is **irreversible**. It removes the video, every tag pointing to it (the links stop
+working for good) and the MP4 file, which is overwritten with zeros and flushed to disk
+before being deleted. The SQLite database runs with `secure_delete`, so the rows do not
+linger in the `.db` file either. Errors: `400` invalid id, `401` wrong/missing key,
+`404` unknown video. To stop a tag temporarily instead, deactivate it (see above).
+
+Limits: this wipes the file as far as the application can. Existing backups and
+snapshots of `DATA_DIR` are not touched, and on SSDs or copy-on-write filesystems
+(btrfs, ZFS) overwriting in place does not guarantee the old blocks are physically gone.
+
 ## Public routes
 
 - `GET /v/:code`: player page (code is case-insensitive).

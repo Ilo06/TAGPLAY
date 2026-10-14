@@ -51,6 +51,29 @@ function tagJson(tag: db.TagWithVideo) {
   };
 }
 
+// Overwrites the file with zeros, flushes it to disk, then unlinks it, so the
+// content is not simply left in freed blocks. A file that is already gone is fine.
+async function eraseFile(filePath: string): Promise<void> {
+  let handle: fsp.FileHandle;
+  try {
+    handle = await fsp.open(filePath, "r+");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+  try {
+    const { size } = await handle.stat();
+    const zeros = Buffer.alloc(1024 * 1024);
+    for (let pos = 0; pos < size; pos += zeros.length) {
+      await handle.write(zeros, 0, Math.min(zeros.length, size - pos), pos);
+    }
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await fsp.rm(filePath, { force: true });
+}
+
 export function createApp(config: Config): express.Express {
   const dataDir = path.resolve(config.dataDir);
   const tmpDir = path.join(dataDir, "tmp");
@@ -83,8 +106,9 @@ export function createApp(config: Config): express.Express {
 
   const app = express();
 
-  // Enable CORS for all origins (allows local html files or remote dashboard to connect)
-  app.use(cors());
+  // Enable CORS for all origins (allows local html files or remote dashboard to connect).
+  // DELETE is listed explicitly: the cors() default already includes it, but this makes it obvious.
+  app.use(cors({ methods: ["GET", "HEAD", "POST", "PATCH", "DELETE"] }));
 
   // ---------- Admin ----------
 
@@ -125,6 +149,36 @@ export function createApp(config: Config): express.Express {
       // No-op once the file has been moved; cleans up tmp/ if the rename failed.
       await fsp.rm(file.path, { force: true });
     }
+  });
+
+  // Permanent and irreversible: removes the video, every tag that points to it
+  // (their links stop working for good) and the MP4 file itself, which is zeroed
+  // and then deleted from disk. The database rows go first, so the public routes
+  // answer 404 immediately.
+  app.delete("/admin/videos/:id", async (req: Request, res: Response) => {
+    const rawId = String(req.params.id);
+    if (!/^\d+$/.test(rawId)) {
+      res.status(400).json({ error: "Video id must be a positive integer" });
+      return;
+    }
+
+    const removed = db.deleteVideo(Number(rawId));
+    if (!removed) {
+      res.status(404).json({ error: "Video not found" });
+      return;
+    }
+
+    try {
+      await eraseFile(path.join(videosDir, removed.fileName));
+    } catch (err) {
+      console.error(`tagplay: could not erase ${removed.fileName}`, err);
+      res.status(500).json({
+        error: "Video removed from the database, but its file could not be erased from disk",
+      });
+      return;
+    }
+
+    res.json({ deleted: true, videoId: Number(rawId), removedTags: removed.codes });
   });
 
   app.get("/admin/tags", (_req: Request, res: Response) => {
